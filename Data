@@ -1,0 +1,272 @@
+
+import os
+import librosa
+import librosa.display
+import numpy as np
+import soundfile as sf
+from PIL import Image, ImageEnhance, ImageOps, ImageFilter
+import random
+import matplotlib.pyplot as plt
+import shutil
+
+
+# יצירת תיקיות
+def create_directories(base_folder):
+    spectrogram_folder = os.path.join(base_folder, "spectrogram")
+    picture_folder = os.path.join(base_folder, "pictures")
+    audio_folder = os.path.join(base_folder, "audio")
+    os.makedirs(spectrogram_folder, exist_ok=True)
+    os.makedirs(picture_folder, exist_ok=True)
+    os.makedirs(audio_folder, exist_ok=True)
+    return spectrogram_folder, picture_folder, audio_folder
+
+def create_spectrogram_only_folder(base_folder):
+    spectrogram_dirs = [os.path.join(base_folder, chord, "spectrogram") 
+                        for chord in os.listdir(base_folder) 
+                        if os.path.isdir(os.path.join(base_folder, chord, "spectrogram"))]
+
+    temp_spectrogram_dir = os.path.join(base_folder, "Spectrogram_Only")
+    
+    if os.path.exists(temp_spectrogram_dir):
+        print(f"Skipping spectrogram copying. Directory '{temp_spectrogram_dir}' already exists.")
+    else:
+        os.makedirs(temp_spectrogram_dir, exist_ok=True)
+        for spectrogram_folder in spectrogram_dirs:
+            chord_name = os.path.basename(os.path.dirname(spectrogram_folder))
+            new_chord_folder = os.path.join(temp_spectrogram_dir, chord_name)
+            os.makedirs(new_chord_folder, exist_ok=True)
+            
+            for file in os.listdir(spectrogram_folder):
+                file_path = os.path.join(spectrogram_folder, file)
+                new_file_path = os.path.join(new_chord_folder, file)
+                if not os.path.exists(new_file_path):
+                    shutil.copy(file_path, new_file_path)
+    print(f"Created Spectrogram_Only folder at {temp_spectrogram_dir}")
+
+
+# שינוי שמות לפי סדר
+def rename_files_sequentially(audio_folder, chord_name):
+    files = sorted(os.listdir(audio_folder), key=lambda x: os.path.getmtime(os.path.join(audio_folder, x)))
+    for i, file_name in enumerate(files, start=1):
+        if file_name.endswith(".wav"):
+            old_path = os.path.join(audio_folder, file_name)
+            new_path = os.path.join(audio_folder, f"{chord_name}_{i}.wav")
+            os.rename(old_path, new_path)
+    print(f"Renamed all files in {chord_name} sequentially.")
+    
+    
+# המרת MP4 ל-WAV
+def convert_mp4_to_wav(input_folder, output_folder):
+    os.makedirs(output_folder, exist_ok=True)
+    for i, file_name in enumerate(os.listdir(input_folder)):
+        if file_name.endswith(".mp4"):
+            mp4_file = os.path.join(input_folder, file_name)
+            wav_file_name = f"output_{i + 1}.wav"
+            wav_file = os.path.join(output_folder, wav_file_name)
+            y, sr = librosa.load(mp4_file, sr=None)
+            sf.write(wav_file, y, sr)
+            print(f"Converted {mp4_file} to {wav_file}")
+
+# שכפול קבצי אודיו עם וריאציות
+def duplicate_audio_with_variations(audio_file, output_folder, start_index):
+    y, sr = librosa.load(audio_file)
+    variations = [
+        {"name": "original", "process": lambda y: y},
+        {"name": "faster", "process": lambda y: librosa.effects.time_stretch(y, rate=1.5)},
+        {"name": "slower", "process": lambda y: librosa.effects.time_stretch(y, rate=0.7)},
+        {"name": "pitch_up", "process": lambda y: librosa.effects.pitch_shift(y, sr=sr, n_steps=2)},
+        {"name": "pitch_down", "process": lambda y: librosa.effects.pitch_shift(y, sr=sr, n_steps=-2)},
+    ]
+    output_files = []
+    for i, variation in enumerate(variations, start=start_index):
+        y_variation = variation["process"](y)
+        output_file = os.path.join(output_folder, f"temp_{i}.wav")
+        sf.write(output_file, y_variation, sr)
+        output_files.append(output_file)
+    return output_files
+
+
+# יצירת תמונות גלי הקול
+def create_waveform_images(audio_folder, picture_folder, chord_name):
+    for file_name in os.listdir(audio_folder):
+        if file_name.endswith(".wav"):
+            audio_file = os.path.join(audio_folder, file_name)
+            y, sr = librosa.load(audio_file, sr=None)
+            plt.figure(figsize=(10, 2))
+            librosa.display.waveshow(y, sr=sr, color='purple')
+            plt.axis('off')
+            plt.tight_layout()
+            picture_file = os.path.join(picture_folder, file_name.replace(".wav", ".png"))
+            plt.savefig(picture_file, dpi=300, bbox_inches='tight', pad_inches=0)
+            plt.close()
+            print(f"Saved waveform: {picture_file}")
+
+# יצירת תמונות ספקטרוגרם בשחור-לבן
+def create_grayscale_spectrogram(audio_folder, spectrogram_folder):
+    for file_name in os.listdir(audio_folder):
+        if file_name.endswith(".wav"):
+            audio_file = os.path.join(audio_folder, file_name)
+            y, sr = librosa.load(audio_file, duration=5.0)
+            S = librosa.feature.melspectrogram(y=y, sr=sr, n_mels=256, fmax=8000)
+            S_db = librosa.power_to_db(S, ref=np.max)
+            S_db_normalized = (S_db - S_db.min()) / (S_db.max() - S_db.min()) * 255
+            S_db_normalized = S_db_normalized.astype(np.uint8)
+            spectrogram_image = Image.fromarray(S_db_normalized)
+            spectrogram_image = spectrogram_image.convert("L")
+
+            # 🔹 שינוי גודל כדי לוודא שכל התמונות יהיו בגודל קבוע
+            spectrogram_image = resize_with_padding(spectrogram_image, target_size=(195, 256))
+
+            spectrogram_file = os.path.join(spectrogram_folder, file_name.replace(".wav", ".png"))
+            spectrogram_image.save(spectrogram_file)
+            print(f"Saved grayscale spectrogram: {spectrogram_file}")
+
+
+# Augmentation לתמונות ספקטרוגרם
+def augment_spectrogram_images(spectrogram_folder, chord_name):
+    files = sorted([file for file in os.listdir(spectrogram_folder) if file.endswith(".png")])
+    
+    # מציאת המספר הגבוה ביותר בתמונות המקוריות
+    max_index = 0
+    for file in files:
+        try:
+            num = int(file.replace(chord_name, "").replace(".png", "").replace("_", "").strip())
+            max_index = max(max_index, num)
+        except ValueError:
+            continue
+
+    start_index = max_index + 1  # מתחילים מהתמונה הבאה
+
+    for file_name in files:
+        image_path = os.path.join(spectrogram_folder, file_name)
+        image = Image.open(image_path)
+
+        # רשימת Augmentations
+        augmentations = [
+           ("contrast", lambda img: ImageEnhance.Contrast(img).enhance(random.uniform(0.8, 1.5))),
+           ("gaussian_noise", add_gaussian_noise),
+           #("brightness", lambda img: ImageEnhance.Brightness(img).enhance(random.uniform(0.8, 1.2))),
+           ("cropped", lambda img: crop_image(img, crop_percent=random.uniform(0.1, 0.2))),
+           ("rotated", lambda img: img.rotate(random.randint(-10, 10))),
+           ("blurred", lambda img: img.filter(ImageFilter.GaussianBlur(radius=random.uniform(1, 2))))
+           ]
+                                                                        
+
+
+        for aug_name, aug_func in augmentations:
+            augmented_image = aug_func(image)
+            
+            augmented_image = resize_with_padding(augmented_image, target_size=(195, 256))
+
+            # יצירת שם קובץ חדש בפורמט "ChordName_X.png"
+            augmented_file_name = f"{chord_name}_{start_index}.png"
+            augmented_image_path = os.path.join(spectrogram_folder, augmented_file_name)
+
+            augmented_image.save(augmented_image_path)
+            print(f"Saved augmented image: {augmented_image_path}")
+
+            start_index += 1  # עדכון המספר לתמונה הבאה
+
+
+def add_gaussian_noise(image):
+    np_image = np.array(image)
+    noise = np.random.normal(0, 15, np_image.shape).astype(np.uint8)
+    noisy_image = np.clip(np_image + noise, 0, 255).astype(np.uint8)
+    return Image.fromarray(noisy_image)
+
+def crop_image(image, crop_percent=0.1):
+    width, height = image.size
+    crop_x = int(width * crop_percent)
+    crop_y = int(height * crop_percent)
+    return image.crop((crop_x, crop_y, width - crop_x, height - crop_y))
+
+def resize_with_padding(image, target_size=(195, 256)):
+    image.thumbnail(target_size, Image.ANTIALIAS)  # Resize while maintaining aspect ratio
+
+    new_image = Image.new("L", target_size, 0)  # Create a new black image (grayscale mode "L")
+    paste_x = (target_size[0] - image.size[0]) // 2  # Center horizontally
+    paste_y = (target_size[1] - image.size[1]) // 2  # Center vertically
+    new_image.paste(image, (paste_x, paste_y))  # Paste the resized image onto the black background
+
+    return new_image
+
+
+
+def main_learn_achords(path_mp4):
+    base_folder = os.path.dirname(path_mp4)
+    achords_learned_path = os.path.join(base_folder, "Data_A_C_Train2")
+    os.makedirs(achords_learned_path, exist_ok=True)
+
+    first_print_done = False  # ✅ משתנה שיעקוב האם כבר הדפסנו את האודיו והספקטרוגרם
+
+    for chord_name in os.listdir(path_mp4):
+        chord_folder = os.path.join(path_mp4, chord_name)
+        if os.path.isdir(chord_folder):
+            chord_output_folder = os.path.join(achords_learned_path, chord_name)
+            os.makedirs(chord_output_folder, exist_ok=True)
+
+            # יצירת תיקיות פנימיות
+            spectrogram_folder, picture_folder, audio_folder = create_directories(chord_output_folder)
+
+            # המרת MP4 ל-WAV
+            convert_mp4_to_wav(chord_folder, audio_folder)
+
+            # עיבוד הקבצים
+            files = sorted(os.listdir(audio_folder), key=lambda x: os.path.getmtime(os.path.join(audio_folder, x)))
+            all_files = []
+            for i, file_name in enumerate(files):
+                if file_name.endswith(".wav"):
+                    audio_file_path = os.path.join(audio_folder, file_name)
+                    duplicated_files = duplicate_audio_with_variations(audio_file_path, audio_folder, start_index=len(all_files) + 1)
+                    all_files.append(audio_file_path)
+                    all_files.extend(duplicated_files)
+
+            # שינוי שמות לפי סדר
+            rename_files_sequentially(audio_folder, chord_name)
+
+            # יצירת גלי קול וספקטרוגרמות
+            create_waveform_images(audio_folder, picture_folder, chord_name)
+            create_grayscale_spectrogram(audio_folder, spectrogram_folder)
+
+            # Augmentation עם העברת שם האקורד
+            augment_spectrogram_images(spectrogram_folder, chord_name)
+
+            # ✅ הדפסת האודיו והספקטרוגרם **רק פעם אחת**
+            if not first_print_done:  
+                first_audio_path = os.path.join(audio_folder, os.listdir(audio_folder)[0])
+                print(f"Playing the first audio file: {first_audio_path}")
+
+                import simpleaudio as sa
+                wave_obj = sa.WaveObject.from_wave_file(first_audio_path)
+                wave_obj.play()
+
+                # יצירת תמונת גלי קול להצגה
+                y, sr = librosa.load(first_audio_path, sr=None)
+                plt.figure(figsize=(10, 2))
+                librosa.display.waveshow(y, sr=sr, color='purple')
+                plt.title("Waveform of First Audio")
+                plt.axis('off')
+                plt.show()
+
+                # הצגת תמונת ספקטרוגרם של אותו אקורד
+                first_spectrogram_path = os.path.join(spectrogram_folder, os.listdir(spectrogram_folder)[0])
+                
+                if os.path.exists(first_spectrogram_path):
+                    first_spectrogram = Image.open(first_spectrogram_path)
+                    plt.figure(figsize=(5, 5))
+                    plt.imshow(first_spectrogram, cmap="gray")
+                    plt.title("Spectrogram of First Audio")
+                    plt.axis("off")
+                    plt.show()
+                    print(f"Displayed spectrogram: {first_spectrogram_path}")
+
+                first_print_done = True  # ✅ מוודאים שזה לא ירוץ שוב!
+
+    # ✅ יצירת התיקייה של ספקטרוגרמות אחרי שהכל הסתיים
+    create_spectrogram_only_folder(achords_learned_path)
+
+    return achords_learned_path
+
+        
+
+    return achords_learned_path
