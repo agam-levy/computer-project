@@ -1,0 +1,155 @@
+from tensorflow.keras.layers import BatchNormalization
+from tensorflow.keras.callbacks import ReduceLROnPlateau
+
+#import os
+import numpy as np
+#import tensorflow as tf
+from tensorflow.keras.preprocessing.image import ImageDataGenerator
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Conv2D, MaxPooling2D, Flatten, Dense
+from tensorflow.keras.callbacks import ModelCheckpoint
+import matplotlib.pyplot as plt
+from tensorflow.keras.layers import Dropout
+#import shutil
+from tensorflow.keras.callbacks import EarlyStopping
+from tensorflow.keras.optimizers import Adam
+
+
+
+# Parameters
+shape = (195, 256)  # התאמה לגודל התמונות שלך
+batch_size = 16
+
+
+data_dir = r"C:\Users\agamt\OneDrive\שולחן העבודה\אגם\אגם פרוייקט מחשבים יב\Data_A_C_Train2\Spectrogram_Only"
+
+
+
+# Data Generators – נטען רק את התמונות מהתיקיות `spectrogram`
+image_generator = ImageDataGenerator(
+    rescale=1.0 / 255,
+    validation_split=0.2  # 80% train, 20% validation
+)
+
+train_dataset = image_generator.flow_from_directory(
+    directory=data_dir,
+    batch_size=batch_size,
+    target_size=shape,
+    subset="training",
+    color_mode="grayscale",
+    class_mode="categorical"  # ✅ שונה ל-categorical כדי לאפשר יותר משני אקורדים
+)
+print("Class Indices:", train_dataset.class_indices)
+
+
+validation_dataset = image_generator.flow_from_directory(
+    directory=data_dir,
+    batch_size=batch_size,
+    target_size=shape,
+    subset="validation",
+    color_mode="grayscale",
+    class_mode="categorical"
+)
+
+# ✅ הדפסת רשימת האקורדים שזוהו
+print("Class Indices:", train_dataset.class_indices)
+
+model = Sequential([
+    Conv2D(32, (3, 3), activation='relu', input_shape=(195, 256, 1)),
+    BatchNormalization(),
+    MaxPooling2D(pool_size=2, strides=2),
+
+    Conv2D(64, (3, 3), activation='relu'),
+    BatchNormalization(),
+    MaxPooling2D(pool_size=2, strides=2),
+
+    Conv2D(128, (3, 3), activation='relu'),
+    BatchNormalization(),
+    MaxPooling2D(pool_size=2, strides=2),
+
+    Flatten(),
+    Dense(512, activation='relu'),
+    Dropout(0.2),
+
+    Dense(len(train_dataset.class_indices), activation='softmax')
+])
+
+
+# Compile עם Learning Rate יותר קטן
+#optimizer = Adam(learning_rate=0.0001)
+
+model.compile(
+    loss='categorical_crossentropy',
+    optimizer=Adam(learning_rate=0.0001),
+    metrics=['accuracy']
+)
+
+# ReduceLROnPlateau כדי למנוע Overfitting
+reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=2, min_lr=0.00001)
+
+# Save the Best Model
+best_model_file = "best_model_multiclass.keras"
+best_model = ModelCheckpoint(
+    best_model_file, monitor="val_accuracy", verbose=1, save_best_only=True
+)
+
+# Early Stopping - עוצר את האימון אם אין שיפור ב- val_loss
+early_stopping = EarlyStopping(
+    monitor="val_loss",  # עוקב אחרי ה-loss של הוולידציה
+    patience=3,  # מספר epochs ללא שיפור לפני עצירה
+    min_delta=0.0001,  # השיפור המינימלי שייחשב כשיפור
+    restore_best_weights=True,  # מחזיר את המשקלים מה-epoch הכי טוב
+    verbose=1
+)
+
+# Train the Model
+steps_per_epoch = max(1, int(np.floor(train_dataset.samples / batch_size)))
+validation_steps = max(1, int(np.floor(validation_dataset.samples / batch_size)))
+
+
+
+history = model.fit(
+    train_dataset,
+    steps_per_epoch=steps_per_epoch,
+    epochs=15,
+    validation_data=validation_dataset,
+    validation_steps=validation_steps,
+    callbacks=[best_model, early_stopping, reduce_lr]  # הוספת ReduceLROnPlateau
+)
+# Save training history
+np.save("training_history.npy", history.history)
+
+
+import training_plots as tp
+
+tp.plot_training(history)
+
+# Visualize a Sample Image
+batch = train_dataset[0]
+img, label = batch[0][0], batch[1][0]
+
+plt.imshow(img.squeeze(), cmap="gray")
+plt.title(f"Label: {label}")
+plt.axis("off")
+plt.show()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
