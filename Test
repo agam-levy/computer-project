@@ -1,0 +1,76 @@
+import numpy as np
+import tensorflow as tf
+import matplotlib.pyplot as plt
+import seaborn as sns
+import os
+from sklearn.metrics import confusion_matrix, classification_report
+
+# 1. Load the trained model
+model = tf.keras.models.load_model("best_model_multiclass.keras")
+
+# 2. Define the test dataset directory (containing new images)
+test_data_dir = r"C:\Users\agamt\OneDrive\שולחן העבודה\אגם\אגם פרוייקט מחשבים יב\Data_A_C_Test\Spectrogram_Only"
+
+# 3. Create ImageDataGenerator for test set (only rescale, no augmentation)
+test_image_generator = tf.keras.preprocessing.image.ImageDataGenerator(rescale=1.0 / 255)
+
+# 4. Load test images
+test_dataset = test_image_generator.flow_from_directory(
+    directory=test_data_dir,
+    target_size=(195, 256),  # Keep the same size as in training
+    batch_size=1,  # One image at a time
+    color_mode="grayscale",
+    class_mode="categorical",
+    shuffle=False  # Important for correct label-order matching
+)
+
+# 5. Run predictions on all test images
+predictions = model.predict(test_dataset)
+
+# 6. Convert predictions to class indices
+y_pred = np.argmax(predictions, axis=1)
+y_true = test_dataset.classes  # True labels from dataset
+
+# 7. Display confusion matrix
+conf_matrix = confusion_matrix(y_true, y_pred)
+
+plt.figure(figsize=(6, 5))
+sns.heatmap(conf_matrix, annot=True, fmt="d", cmap="Blues",
+            xticklabels=test_dataset.class_indices.keys(), yticklabels=test_dataset.class_indices.keys())
+plt.xlabel("Predicted")
+plt.ylabel("True")
+plt.title("Confusion Matrix")
+plt.show()
+
+# 8. Display classification report (Precision, Recall, F1-Score)
+report = classification_report(y_true, y_pred, target_names=test_dataset.class_indices.keys())
+print("🔍 Classification Report:\n", report)
+
+# 9. Load and display training history (if available)
+history_file = "training_history.npy"
+
+if os.path.exists(history_file):
+    history = np.load(history_file, allow_pickle=True).item()
+
+    # Accuracy Plot
+    plt.figure(figsize=(8, 5))
+    plt.plot(history['accuracy'], label="Train Accuracy")
+    plt.plot(history['val_accuracy'], label="Validation Accuracy")
+    plt.xlabel("Epochs")
+    plt.ylabel("Accuracy")
+    plt.legend()
+    plt.title("Accuracy Over Epochs")
+    plt.show()
+
+    # Loss Plot
+    plt.figure(figsize=(8, 5))
+    plt.plot(history['loss'], label="Train Loss")
+    plt.plot(history['val_loss'], label="Validation Loss")
+    plt.xlabel("Epochs")
+    plt.ylabel("Loss")
+    plt.legend()
+    plt.title("Loss Over Epochs")
+    plt.show()
+
+else:
+    print("⚠️ Warning: training_history.npy not found. Skipping history plots.")
