@@ -201,7 +201,7 @@ def resize_with_padding(image, target_size=(195, 256)):
 
 def main_learn_achords(path_mp4):
     base_folder = os.path.dirname(path_mp4)
-    achords_learned_path = os.path.join(base_folder, "Data_A_C_Train_New")
+    achords_learned_path = os.path.join(base_folder, "Data_A_C_All")
     os.makedirs(achords_learned_path, exist_ok=True)
 
     first_print_done = False  # ✅ משתנה שיעקוב האם כבר הדפסנו את האודיו והספקטרוגרם
